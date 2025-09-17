@@ -1,40 +1,54 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { destination, dateRange, travelers, budget } = body;
+    const { destination, dateRange, travelers, budget } = await req.json();
 
     const prompt = `
-    Provide a concise overview for ${destination || "this trip"}.
+You are a travel assistant. Return ONLY valid JSON. 
+Keys required: weather, crowds, pricing, overall.
+You MAY add up to 2 optional keys if relevant (e.g., events, safety, culture, tips).
 
-    Context:
-    - Travel dates: ${JSON.stringify(dateRange)}
-    - Travelers: ${JSON.stringify(travelers)}
-    - Budget: ${budget || "any"}
+Example format:
+{
+  "weather": "Insight on expected climate",
+  "crowds": "Insight on crowds",
+  "pricing": "Insight on costs",
+  "overall": "Holistic summary"
+}
+`;
 
-    Respond in JSON:
-    {
-      "summary": "1–2 paragraphs with weather, crowds, pricing and what to expect for this specific timeframe."
-    }
-    `;
-
-    const completion = await client.chat.completions.create({
+    const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "You are a helpful travel assistant." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.7,
+      response_format: { type: "json_object" }, // ✅ forces JSON
     });
 
-    const parsed = JSON.parse(completion.choices[0].message?.content || "{}");
+    let summary;
+    try {
+      summary = JSON.parse(response.choices[0].message?.content || "{}");
+    } catch (err) {
+      console.error("Failed to parse JSON:", response.choices[0].message?.content);
+      summary = {
+        overall: response.choices[0].message?.content || "No details available.",
+      };
+    }
 
-    return NextResponse.json({
-      summary: parsed.summary || "Overview not available.",
-    });
-  } catch (error) {
-    console.error("Error generating summary:", error);
-    return NextResponse.json({ summary: "Unable to generate overview." }, { status: 500 });
+    return NextResponse.json({ summary });
+  } catch (err) {
+    console.error("Error generating plan:", err);
+    return NextResponse.json(
+      { error: "Failed to generate travel outlook" },
+      { status: 500 }
+    );
   }
 }

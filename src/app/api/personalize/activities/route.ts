@@ -1,60 +1,68 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { destination, travelers, budget } = body;
+    const { destination, travelers, budget } = await req.json();
 
     const prompt = `
-    Suggest 5–7 popular activities for ${destination || "this destination"}.
-    Context:
-    - Travelers: ${JSON.stringify(travelers)}
-    - Budget: ${budget || "any"}
-    
-    Respond in strict JSON:
+You are a travel assistant. Based on the user's selected destination, traveler profile, and budget,
+generate a set of recommended activities. Always return valid JSON.
+
+Format:
+{
+  "categories": [
     {
-      "suggestedActivities": ["activity1", "activity2", ...]
+      "name": "Category Name (e.g. Culture, Food, Adventure, Nature, Relaxation)",
+      "activities": [
+        "Specific activity 1",
+        "Specific activity 2",
+        "Specific activity 3"
+      ]
     }
-    `;
+  ]
+}
 
-    const completion = await client.chat.completions.create({
+Destination: ${destination}
+Travelers: ${JSON.stringify(travelers)}
+Budget: ${budget}
+
+Guidelines:
+- Include 3–5 categories relevant to this destination.
+- Each category should contain 3–6 activities.
+- Be specific (e.g., "Guided tour of the Louvre" instead of just "Museum").
+- Match the budget (low = affordable/free, high = premium/luxury).
+- Consider family vs solo vs couples when suggesting activities.
+`;
+
+    const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "You are a helpful travel activity planner." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.8,
     });
 
-    let parsed;
+    const rawText = response.choices[0].message?.content || "{}";
+
+    let categories;
     try {
-      parsed = JSON.parse(completion.choices[0].message?.content || "{}");
-    } catch {
-      parsed = {};
+      categories = JSON.parse(rawText).categories;
+    } catch (err) {
+      console.error("Failed to parse JSON:", rawText);
+      categories = [];
     }
 
-    return NextResponse.json({
-      suggestedActivities:
-        parsed.suggestedActivities || [
-          "City walking tour",
-          "Local food tasting",
-          "Popular museum visit",
-          "Outdoor adventure",
-          "Relax at a scenic spot",
-        ],
-    });
-  } catch (error) {
-    console.error("Error generating activities:", error);
+    return NextResponse.json({ categories });
+  } catch (err) {
+    console.error("Error fetching activities:", err);
     return NextResponse.json(
-      {
-        suggestedActivities: [
-          "City walking tour",
-          "Local food tasting",
-          "Popular museum visit",
-          "Outdoor adventure",
-          "Relax at a scenic spot",
-        ],
-      },
+      { error: "Failed to fetch activities" },
       { status: 500 }
     );
   }
